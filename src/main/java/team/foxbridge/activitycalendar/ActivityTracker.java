@@ -73,8 +73,56 @@ public class ActivityTracker {
                 .flatMap(content -> loadContributor(item)
                     .map(user -> baselineSpec(item, new LoadedContent(
                         normalize(content.getContent()), user.username(), user.displayName()))))
-                .filter(Objects::nonNull)
+                .filter(spec -> spec != null)
                 .onErrorResume(error -> Mono.empty()));
+    }
+
+    /**
+     * Debug4: inspect final baselineSpec generation.
+     * This checks why valid content is not converted into ActivityRecord.Spec.
+     */
+    public Flux<Map<String, Object>> diagnosticBaselineForYear(int year, int limit) {
+        return Flux.concat(postDescriptors(), pageDescriptors())
+            .filter(item -> historicalDate(item).startsWith(year + "-"))
+            .take(Math.max(1, limit))
+            .concatMap(item -> {
+                Map<String,Object> result = new LinkedHashMap<>();
+                result.put("name", item.name());
+                result.put("date", historicalDate(item));
+                result.put("owner", item.owner());
+
+                return loadContent(item)
+                    .flatMap(content -> loadContributor(item)
+                        .map(user -> {
+                            LoadedContent loaded = new LoadedContent(
+                                normalize(content.getContent()),
+                                user.username(),
+                                user.displayName());
+
+                            result.put("textBlank", loaded.text().isBlank());
+                            result.put("textLength", loaded.text().length());
+                            result.put("username", loaded.username());
+
+                            ActivityRecord.Spec spec = baselineSpec(item, loaded);
+
+                            result.put("baselineSpecReturnedNull", spec == null);
+                            if (spec != null) {
+                                result.put("score", spec.getScore());
+                                result.put("dateGenerated", spec.getDate());
+                            }
+                            return result;
+                        }))
+                    .switchIfEmpty(Mono.fromSupplier(() -> {
+                        result.put("baselineSpecReturnedNull", true);
+                        result.put("reason", "content-or-user-empty");
+                        return result;
+                    }))
+                    .onErrorResume(error -> {
+                        result.put("errorClass", error.getClass().getName());
+                        result.put("errorMessage", String.valueOf(error.getMessage()));
+                        return Mono.just(result);
+                    });
+            });
     }
 
 

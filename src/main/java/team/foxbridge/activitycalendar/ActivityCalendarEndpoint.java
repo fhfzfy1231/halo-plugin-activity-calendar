@@ -93,13 +93,14 @@ public class ActivityCalendarEndpoint implements CustomEndpoint {
         int current = Year.now().getValue();
         int year = request.queryParam("year").map(this::parseYear).orElse(current);
         Map<String, Object> report = new LinkedHashMap<>();
-        report.put("pluginVersion", "2.0.0-debug.3");
+        report.put("pluginVersion", "2.0.0-debug.4");
         report.put("year", year);
         report.put("status", "running");
 
         return diagnosticCountPosts(report)
             .then(diagnosticCountPages(report))
             .then(diagnosticContent(year, report))
+            .then(diagnosticBaselineSpec(year, report))
             .then(diagnosticBaseline(year, report))
             .then(Mono.fromSupplier(() -> {
                 report.put("status", "completed");
@@ -181,7 +182,14 @@ public class ActivityCalendarEndpoint implements CustomEndpoint {
             .then();
     }
 
-    private Mono<Void> diagnosticBaseline(int year, Map<String, Object> report) {
+\n    private Mono<Void> diagnosticBaselineSpec(int year, Map<String,Object> report) {
+        report.put("phase", "baseline-spec-generation");
+        return tracker.diagnosticBaselineForYear(year, 20)
+            .collectList()
+            .doOnNext(list -> report.put("baselineSpecDiagnostics", list))
+            .then();
+    }
+\n    private Mono<Void> diagnosticBaseline(int year, Map<String, Object> report) {
         report.put("phase", "baseline-for-year");
         return tracker.baselineForYear(year)
             .collectList()
