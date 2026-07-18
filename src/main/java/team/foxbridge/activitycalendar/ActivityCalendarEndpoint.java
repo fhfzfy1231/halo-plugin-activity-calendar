@@ -51,7 +51,13 @@ public class ActivityCalendarEndpoint implements CustomEndpoint {
             .map(records -> aggregate(year, records))
             .flatMap(body -> ServerResponse.ok()
                 .cacheControl(CacheControl.maxAge(java.time.Duration.ofSeconds(60)).cachePublic())
-                .bodyValue(body));
+                .bodyValue(body))
+            .onErrorResume(error -> ServerResponse.ok()
+                .bodyValue(Map.of(
+                    "year", year,
+                    "totalScore", 0,
+                    "days", List.of(),
+                    "message", "Activity calendar data unavailable")));
     }
 
     private Map<String, Object> aggregate(int year, List<ActivityRecord> records) {

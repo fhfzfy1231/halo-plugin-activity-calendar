@@ -17,7 +17,7 @@
   function fetchYear(year) {
     if (!cache.has(year)) {
       cache.set(year, fetch(`${API}?year=${year}`, { credentials: 'same-origin' }).then(response => {
-        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        if (!response.ok) throw new Error(`接口请求失败 HTTP ${response.status}`);
         return response.json();
       }));
     }

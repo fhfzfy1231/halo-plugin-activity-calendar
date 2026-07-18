@@ -1,4 +1,6 @@
-# Halo 全站创作活跃日历
+# Halo Plugin Activity Calendar
+
+> Halo 全站创作活跃度日历插件
 
 以 GitHub Contributions Calendar 的形式，在 Halo 页面中展示所有作者每天的创作活跃度。
 
@@ -41,7 +43,7 @@
 
 ## 安装
 
-1. 下载 Release 中的 `halo-plugin-activity-calendar-1.0.0.jar`。
+1. 下载 Release 中的 `halo-plugin-activity-calendar-1.0.1.jar`。
 2. 进入 Halo 后台的“插件”页面，点击右上角“安装插件”。
 3. 上传 JAR，安装并启用。
 
@@ -76,3 +78,10 @@ git push -u origin main
 ```
 
 如果已经初始化过 Git 仓库，则不需要再次执行 `git init`。
+
+
+## v1.0.1 更新
+
+- 修复前台接口异常时导致活跃度数据加载失败的问题。
+- 增强游客访问稳定性和空数据处理。
+- 修复版本号并优化发布流程。
