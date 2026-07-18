@@ -1,5 +1,7 @@
 package team.foxbridge.activitycalendar;
 
+import java.io.PrintWriter;
+import java.io.StringWriter;
 import java.time.Year;
 import java.util.ArrayList;
 import java.util.Comparator;
@@ -15,6 +17,8 @@ import org.springframework.web.reactive.function.server.ServerRequest;
 import org.springframework.web.reactive.function.server.ServerResponse;
 import reactor.core.publisher.Mono;
 import run.halo.app.core.extension.endpoint.CustomEndpoint;
+import run.halo.app.core.extension.content.Post;
+import run.halo.app.core.extension.content.SinglePage;
 import run.halo.app.extension.GroupVersion;
 import run.halo.app.extension.ReactiveExtensionClient;
 
@@ -33,6 +37,7 @@ public class ActivityCalendarEndpoint implements CustomEndpoint {
     public RouterFunction<ServerResponse> endpoint() {
         return RouterFunctions.route()
             .GET("calendar", this::calendar)
+            .GET("calendar/debug", this::debug)
             .POST("calendar/rebuild-history", this::rebuildHistory)
             .build();
     }
@@ -82,6 +87,109 @@ public class ActivityCalendarEndpoint implements CustomEndpoint {
             day.users.add(user);
         }
         return finishAggregate(year, totalScore, days);
+    }
+
+    private Mono<ServerResponse> debug(ServerRequest request) {
+        int current = Year.now().getValue();
+        int year = request.queryParam("year").map(this::parseYear).orElse(current);
+        Map<String, Object> report = new LinkedHashMap<>();
+        report.put("pluginVersion", "2.0.0-debug.1");
+        report.put("year", year);
+        report.put("status", "running");
+
+        return diagnosticCountPosts(report)
+            .then(diagnosticCountPages(report))
+            .then(diagnosticBaseline(year, report))
+            .then(Mono.fromSupplier(() -> {
+                report.put("status", "completed");
+                return report;
+            }))
+            .onErrorResume(error -> {
+                report.put("status", "failed");
+                report.put("errorClass", error.getClass().getName());
+                report.put("errorMessage", String.valueOf(error.getMessage()));
+                report.put("rootCause", rootCause(error));
+                report.put("stackTrace", stackTrace(error));
+                return Mono.just(report);
+            })
+            .flatMap(body -> ServerResponse.ok()
+                .cacheControl(CacheControl.noStore())
+                .bodyValue(body));
+    }
+
+    private Mono<Void> diagnosticCountPosts(Map<String, Object> report) {
+        report.put("phase", "list-posts");
+        return client.list(Post.class, post -> true,
+                Comparator.comparing(post -> post.getMetadata().getName()))
+            .collectList()
+            .doOnNext(posts -> {
+                report.put("postCount", posts.size());
+                List<Map<String, Object>> samples = new ArrayList<>();
+                posts.stream().limit(10).forEach(post -> {
+                    Map<String, Object> item = new LinkedHashMap<>();
+                    item.put("name", post.getMetadata() == null ? null : post.getMetadata().getName());
+                    item.put("hasSpec", post.getSpec() != null);
+                    if (post.getSpec() != null) {
+                        item.put("owner", post.getSpec().getOwner());
+                        item.put("publish", post.getSpec().getPublish());
+                        item.put("publishTime", String.valueOf(post.getSpec().getPublishTime()));
+                        item.put("headSnapshot", post.getSpec().getHeadSnapshot());
+                        item.put("baseSnapshot", post.getSpec().getBaseSnapshot());
+                        item.put("releaseSnapshot", post.getSpec().getReleaseSnapshot());
+                    }
+                    samples.add(item);
+                });
+                report.put("postSamples", samples);
+            })
+            .then();
+    }
+
+    private Mono<Void> diagnosticCountPages(Map<String, Object> report) {
+        report.put("phase", "list-pages");
+        return client.list(SinglePage.class, page -> true,
+                Comparator.comparing(page -> page.getMetadata().getName()))
+            .collectList()
+            .doOnNext(pages -> report.put("pageCount", pages.size()))
+            .then();
+    }
+
+    private Mono<Void> diagnosticBaseline(int year, Map<String, Object> report) {
+        report.put("phase", "baseline-for-year");
+        return tracker.baselineForYear(year)
+            .collectList()
+            .doOnNext(specs -> {
+                report.put("baselineRecordCount", specs.size());
+                long score = specs.stream().mapToLong(ActivityRecord.Spec::getScore).sum();
+                report.put("baselineTotalScore", score);
+                List<Map<String, Object>> samples = new ArrayList<>();
+                specs.stream().limit(10).forEach(spec -> {
+                    Map<String, Object> item = new LinkedHashMap<>();
+                    item.put("date", spec.getDate());
+                    item.put("username", spec.getUsername());
+                    item.put("displayName", spec.getDisplayName());
+                    item.put("addedWords", spec.getAddedWords());
+                    item.put("publishedCount", spec.getPublishedCount());
+                    item.put("score", spec.getScore());
+                    samples.add(item);
+                });
+                report.put("baselineSamples", samples);
+            })
+            .then();
+    }
+
+    private String rootCause(Throwable error) {
+        Throwable root = error;
+        while (root.getCause() != null && root.getCause() != root) {
+            root = root.getCause();
+        }
+        return root.getClass().getName() + ": " + String.valueOf(root.getMessage());
+    }
+
+    private String stackTrace(Throwable error) {
+        StringWriter writer = new StringWriter();
+        error.printStackTrace(new PrintWriter(writer));
+        String trace = writer.toString();
+        return trace.length() > 24000 ? trace.substring(0, 24000) : trace;
     }
 
     private Mono<ServerResponse> rebuildHistory(ServerRequest request) {
