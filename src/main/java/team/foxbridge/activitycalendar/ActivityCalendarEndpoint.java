@@ -33,6 +33,7 @@ public class ActivityCalendarEndpoint implements CustomEndpoint {
     public RouterFunction<ServerResponse> endpoint() {
         return RouterFunctions.route()
             .GET("calendar", this::calendar)
+            .POST("calendar/rebuild-history", this::rebuildHistory)
             .build();
     }
 
@@ -58,6 +59,14 @@ public class ActivityCalendarEndpoint implements CustomEndpoint {
                     "totalScore", 0,
                     "days", List.of(),
                     "message", "Activity calendar data unavailable")));
+    }
+
+    private Mono<ServerResponse> rebuildHistory(ServerRequest request) {
+        return tracker.rebuildHistory()
+            .then(ServerResponse.ok().bodyValue(Map.of(
+                "success", true,
+                "message", "Historical activity rebuild completed"
+            )));
     }
 
     private Map<String, Object> aggregate(int year, List<ActivityRecord> records) {

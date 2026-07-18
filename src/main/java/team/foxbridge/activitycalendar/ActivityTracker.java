@@ -53,6 +53,53 @@ public class ActivityTracker {
         this.settingFetcher = settingFetcher;
     }
 
+
+    /**
+     * Rebuild activity records from existing Halo contents.
+     *
+     * Halo does not expose every historical editor operation after installation,
+     * therefore this reconstruction uses existing content snapshots as the source.
+     * Future edits continue to be tracked incrementally.
+     */
+    public Mono<Void> rebuildHistory() {
+        states.clear();
+        Flux<ContentDescriptor> posts = client.list(Post.class, post -> true, POST_ORDER)
+            .map(post -> new ContentDescriptor(
+                "post/" + post.getMetadata().getName(),
+                post.getMetadata().getName(),
+                post.getSpec().getOwner(),
+                post.getSpec().getHeadSnapshot(),
+                post.getSpec().getBaseSnapshot(),
+                post.getSpec().getReleaseSnapshot(),
+                Boolean.TRUE.equals(post.getSpec().getPublish()),
+                false));
+        Flux<ContentDescriptor> pages = client.list(SinglePage.class, page -> true, PAGE_ORDER)
+            .map(page -> new ContentDescriptor(
+                "page/" + page.getMetadata().getName(),
+                page.getMetadata().getName(),
+                page.getSpec().getOwner(),
+                page.getSpec().getHeadSnapshot(),
+                page.getSpec().getBaseSnapshot(),
+                page.getSpec().getReleaseSnapshot(),
+                Boolean.TRUE.equals(page.getSpec().getPublish()),
+                true));
+
+        return Flux.concat(posts, pages)
+            .concatMap(item -> loadContent(item)
+                .flatMap(content -> loadContributor(item)
+                    .flatMap(user -> {
+                        String text = normalize(content.getContent());
+                        if (text.isBlank()) {
+                            return Mono.empty();
+                        }
+                        return addActivity(user.username(), user.displayName(),
+                            text.length(), 0,
+                            item.published() ? 1 : 0, 0);
+                    }))
+                .onErrorResume(error -> Mono.empty()))
+            .then();
+    }
+
     public synchronized void startTracking() {
         if (trackingTask != null && !trackingTask.isDisposed()) {
             return;
