@@ -77,9 +77,11 @@ public class ActivityTracker {
             .filter(item -> historicalDate(item).startsWith(year + "-"))
             .concatMap(item -> loadContent(item)
                 .flatMap(content -> loadContributor(item)
-                    .map(user -> baselineSpec(item, new LoadedContent(
-                        normalize(content.getContent()), user.username(), user.displayName()))))
-                .filter(spec -> spec != null)
+                    .flatMap(user -> {
+                        ActivityRecord.Spec spec = baselineSpec(item, new LoadedContent(
+                            normalize(content.getContent()), user.username(), user.displayName()));
+                        return spec == null ? Mono.empty() : Mono.just(spec);
+                    }))
                 .onErrorResume(error -> {
                     Map<String,Object> diagnostic = new LinkedHashMap<>();
                     diagnostic.put("errorClass", error.getClass().getName());
