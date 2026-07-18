@@ -196,7 +196,8 @@ public class ActivityCalendarEndpoint implements CustomEndpoint {
             .doOnNext(specs -> {
                 report.put("baselineRecordCount", specs.size());
                 long score = specs.stream().mapToLong(ActivityRecord.Spec::getScore).sum();
-                report.put("baselineTotalScore", score);
+                 report.put("baselineTotalScore", score);
+                report.put("baselineErrors", tracker.baselineErrors());
                 List<Map<String, Object>> samples = new ArrayList<>();
                 specs.stream().limit(10).forEach(spec -> {
                     Map<String, Object> item = new LinkedHashMap<>();

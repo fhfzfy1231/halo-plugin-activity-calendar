@@ -51,6 +51,7 @@ public class ActivityTracker {
     private final SettingFetcher settingFetcher;
     private final Map<String, ContentState> states = new ConcurrentHashMap<>();
     private final Map<String, ActivityRecord.Spec> runtimeRecords = new ConcurrentHashMap<>();
+    private final List<Map<String, Object>> baselineErrors = new java.util.concurrent.CopyOnWriteArrayList<>();
     private Disposable trackingTask;
 
     public ActivityTracker(ReactiveExtensionClient client, PostContentService postContentService,
@@ -74,7 +75,14 @@ public class ActivityTracker {
                     .map(user -> baselineSpec(item, new LoadedContent(
                         normalize(content.getContent()), user.username(), user.displayName()))))
                 .filter(spec -> spec != null)
-                .onErrorResume(error -> Mono.empty()));
+                .onErrorResume(error -> {
+                    Map<String,Object> diagnostic = new LinkedHashMap<>();
+                    diagnostic.put("errorClass", error.getClass().getName());
+                    diagnostic.put("errorMessage", String.valueOf(error.getMessage()));
+                    diagnostic.put("rootCause", error.getCause() == null ? null : error.getCause().toString());
+                    baselineErrors.add(diagnostic);
+                    return Mono.empty();
+                }));
     }
 
     /**
