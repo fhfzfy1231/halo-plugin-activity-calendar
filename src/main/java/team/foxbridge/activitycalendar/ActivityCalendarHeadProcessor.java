@@ -22,10 +22,15 @@ public class ActivityCalendarHeadProcessor implements TemplateHeadProcessor {
         IElementModelStructureHandler structureHandler) {
         String version = pluginContext.getVersion();
         String root = "/plugins/activity-calendar/assets/static/";
-        String html = "\n<!-- Activity Calendar start -->\n"
-            + "<link rel=\"stylesheet\" href=\"" + root + "activity-calendar.css?v=" + version + "\">\n"
-            + "<script defer src=\"" + root + "activity-calendar.js?v=" + version + "\"></script>\n"
-            + "<!-- Activity Calendar end -->\n";
+        String html = "
+<!-- Activity Calendar start -->
+"
+            + "<link rel=\"stylesheet\" href=\"" + root + "activity-calendar.css?v=" + version + "\">
+"
+            + "<script defer src=\"" + root + "activity-calendar.js?v=" + version + "\"></script>
+"
+            + "<!-- Activity Calendar end -->
+";
         model.add(context.getModelFactory().createText(html));
         return Mono.empty();
     }
