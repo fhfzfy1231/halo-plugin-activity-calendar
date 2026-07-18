@@ -93,7 +93,7 @@ public class ActivityCalendarEndpoint implements CustomEndpoint {
         int current = Year.now().getValue();
         int year = request.queryParam("year").map(this::parseYear).orElse(current);
         Map<String, Object> report = new LinkedHashMap<>();
-        report.put("pluginVersion", "2.0.0-debug.4");
+        report.put("pluginVersion", "2.1.0");
         report.put("year", year);
         report.put("status", "running");
 
