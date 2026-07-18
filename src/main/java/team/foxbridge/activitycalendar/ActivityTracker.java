@@ -3,6 +3,7 @@ package team.foxbridge.activitycalendar;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.time.Duration;
+import java.time.Instant;
 import java.time.LocalDate;
 import java.time.ZoneId;
 import java.util.Comparator;
@@ -62,40 +63,14 @@ public class ActivityTracker {
      * Future edits continue to be tracked incrementally.
      */
     public Mono<Void> rebuildHistory() {
-        states.clear();
-        Flux<ContentDescriptor> posts = client.list(Post.class, post -> true, POST_ORDER)
-            .map(post -> new ContentDescriptor(
-                "post/" + post.getMetadata().getName(),
-                post.getMetadata().getName(),
-                post.getSpec().getOwner(),
-                post.getSpec().getHeadSnapshot(),
-                post.getSpec().getBaseSnapshot(),
-                post.getSpec().getReleaseSnapshot(),
-                Boolean.TRUE.equals(post.getSpec().getPublish()),
-                false));
-        Flux<ContentDescriptor> pages = client.list(SinglePage.class, page -> true, PAGE_ORDER)
-            .map(page -> new ContentDescriptor(
-                "page/" + page.getMetadata().getName(),
-                page.getMetadata().getName(),
-                page.getSpec().getOwner(),
-                page.getSpec().getHeadSnapshot(),
-                page.getSpec().getBaseSnapshot(),
-                page.getSpec().getReleaseSnapshot(),
-                Boolean.TRUE.equals(page.getSpec().getPublish()),
-                true));
-
+        Flux<ContentDescriptor> posts = postDescriptors();
+        Flux<ContentDescriptor> pages = pageDescriptors();
         return Flux.concat(posts, pages)
             .concatMap(item -> loadContent(item)
                 .flatMap(content -> loadContributor(item)
-                    .flatMap(user -> {
-                        String text = normalize(content.getContent());
-                        if (text.isBlank()) {
-                            return Mono.empty();
-                        }
-                        return addActivity(user.username(), user.displayName(),
-                            text.length(), 0,
-                            item.published() ? 1 : 0, 0);
-                    }))
+                    .flatMap(user -> seedContentActivity(item,
+                        new LoadedContent(normalize(content.getContent()),
+                            user.username(), user.displayName()))))
                 .onErrorResume(error -> Mono.empty()))
             .then();
     }
@@ -104,8 +79,9 @@ public class ActivityTracker {
         if (trackingTask != null && !trackingTask.isDisposed()) {
             return;
         }
-        trackingTask = scanAll(true)
-            .thenMany(Flux.interval(Duration.ofSeconds(15)).concatMap(ignored -> scanAll(false)))
+        trackingTask = rebuildHistory()
+            .then(scanAll(true))
+            .thenMany(Flux.interval(Duration.ofSeconds(10)).concatMap(ignored -> scanAll(false)))
             .onErrorContinue((error, value) -> { })
             .subscribe();
     }
@@ -119,7 +95,13 @@ public class ActivityTracker {
     }
 
     private Mono<Void> scanAll(boolean baselineOnly) {
-        Flux<ContentDescriptor> posts = client.list(Post.class, post -> true, POST_ORDER)
+        return Flux.concat(postDescriptors(), pageDescriptors())
+            .concatMap(descriptor -> inspect(descriptor, baselineOnly))
+            .then();
+    }
+
+    private Flux<ContentDescriptor> postDescriptors() {
+        return client.list(Post.class, post -> post.getSpec() != null, POST_ORDER)
             .map(post -> new ContentDescriptor(
                 "post/" + post.getMetadata().getName(),
                 post.getMetadata().getName(),
@@ -128,8 +110,13 @@ public class ActivityTracker {
                 post.getSpec().getBaseSnapshot(),
                 post.getSpec().getReleaseSnapshot(),
                 Boolean.TRUE.equals(post.getSpec().getPublish()),
+                post.getSpec().getPublishTime(),
+                post.getMetadata().getCreationTimestamp(),
                 false));
-        Flux<ContentDescriptor> pages = client.list(SinglePage.class, page -> true, PAGE_ORDER)
+    }
+
+    private Flux<ContentDescriptor> pageDescriptors() {
+        return client.list(SinglePage.class, page -> page.getSpec() != null, PAGE_ORDER)
             .map(page -> new ContentDescriptor(
                 "page/" + page.getMetadata().getName(),
                 page.getMetadata().getName(),
@@ -138,10 +125,9 @@ public class ActivityTracker {
                 page.getSpec().getBaseSnapshot(),
                 page.getSpec().getReleaseSnapshot(),
                 Boolean.TRUE.equals(page.getSpec().getPublish()),
+                page.getSpec().getPublishTime(),
+                page.getMetadata().getCreationTimestamp(),
                 true));
-        return Flux.concat(posts, pages)
-            .concatMap(descriptor -> inspect(descriptor, baselineOnly))
-            .then();
     }
 
     private Mono<Void> inspect(ContentDescriptor descriptor, boolean baselineOnly) {
@@ -160,8 +146,14 @@ public class ActivityTracker {
                 ContentState current = new ContentState(loaded.text(), descriptor.headSnapshot(),
                     descriptor.releaseSnapshot(), descriptor.published());
                 states.put(descriptor.key(), current);
-                if (baselineOnly || previous == null) {
+                if (baselineOnly) {
                     return Mono.empty();
+                }
+                if (previous == null) {
+                    // Content created between two polling cycles must count as activity instead of
+                    // being silently treated as a new baseline. This was the main reason newly
+                    // published posts could show 0 activity.
+                    return seedContentActivity(descriptor, loaded);
                 }
                 TextDelta delta = calculateDelta(previous.text(), current.text());
                 int published = !previous.published() && current.published() ? 1 : 0;
@@ -207,6 +199,37 @@ public class ActivityTracker {
                 .map(user -> new Contributor(name,
                     isBlank(user.getSpec().getDisplayName()) ? name : user.getSpec().getDisplayName()))
                 .defaultIfEmpty(new Contributor(name, name)));
+    }
+
+    private Mono<Void> seedContentActivity(ContentDescriptor descriptor, LoadedContent loaded) {
+        if (loaded.text().isBlank()) {
+            return Mono.empty();
+        }
+        String date = historicalDate(descriptor);
+        String recordName = "history-" + date.replace("-", "") + "-"
+            + shortHash(descriptor.key() + "/" + loaded.username());
+        long added = countUnits(loaded.text());
+        int published = descriptor.published() ? 1 : 0;
+        ActivitySettings settings = settings();
+        long score = Math.round(added * settings.getAddedWeight()
+            + (long) published * settings.getPublishScore());
+
+        // A deterministic per-content record makes history reconstruction idempotent.
+        // If it already exists, it means this content was seeded before, so do not add it again.
+        return client.fetch(ActivityRecord.class, recordName)
+            .switchIfEmpty(Mono.defer(() -> client.create(newRecord(recordName, date,
+                loaded.username(), loaded.displayName(), added, 0, published, 0, score))))
+            .then();
+    }
+
+    private String historicalDate(ContentDescriptor descriptor) {
+        Instant instant = descriptor.published() && descriptor.publishTime() != null
+            ? descriptor.publishTime()
+            : descriptor.creationTime();
+        if (instant == null) {
+            return LocalDate.now(ZoneId.systemDefault()).toString();
+        }
+        return instant.atZone(ZoneId.systemDefault()).toLocalDate().toString();
     }
 
     private Mono<Void> addActivity(String username, String displayName, long added, long modified,
@@ -322,7 +345,7 @@ public class ActivityTracker {
 
     record ContentDescriptor(String key, String name, String owner, String headSnapshot,
                              String baseSnapshot, String releaseSnapshot, boolean published,
-                             boolean page) { }
+                             Instant publishTime, Instant creationTime, boolean page) { }
     record ContentState(String text, String headSnapshot, String releaseSnapshot,
                         boolean published) { }
     record LoadedContent(String text, String username, String displayName) { }
