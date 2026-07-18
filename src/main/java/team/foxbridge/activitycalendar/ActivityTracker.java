@@ -102,17 +102,26 @@ public class ActivityTracker {
         result.put("headSnapshot", descriptor.headSnapshot());
         result.put("baseSnapshot", descriptor.baseSnapshot());
         result.put("releaseSnapshot", descriptor.releaseSnapshot());
+        result.put("failAt", null);
+        result.put("step1DescriptorRead", "ok");
 
         Set<String> candidates = new LinkedHashSet<>();
         if (!isBlank(descriptor.owner())) {
             candidates.add(descriptor.owner());
         }
 
-        Mono<Void> owners = Flux.just(
-                descriptor.baseSnapshot(),
-                descriptor.headSnapshot(),
-                descriptor.releaseSnapshot())
-            .filter(id -> !isBlank(id))
+        List<String> snapshotIds = new ArrayList<>();
+        if (!isBlank(descriptor.baseSnapshot())) {
+            snapshotIds.add(descriptor.baseSnapshot());
+        }
+        if (!isBlank(descriptor.headSnapshot())) {
+            snapshotIds.add(descriptor.headSnapshot());
+        }
+        if (!isBlank(descriptor.releaseSnapshot())) {
+            snapshotIds.add(descriptor.releaseSnapshot());
+        }
+
+        Mono<Void> owners = Flux.fromIterable(snapshotIds)
             .distinct()
             .concatMap(id -> client.fetch(Snapshot.class, id)
                 .doOnNext(snapshot -> {
@@ -121,19 +130,24 @@ public class ActivityTracker {
                         candidates.add(owner);
                     }
                     result.put("snapshotOwner:" + id, owner);
+                    result.put("step2SnapshotRead", "ok");
                 })
                 .switchIfEmpty(Mono.fromRunnable(() ->
                     result.put("snapshotMissing:" + id, true)))
                 .onErrorResume(error -> {
                     result.put("snapshotError:" + id,
                         error.getClass().getName() + ": " + String.valueOf(error.getMessage()));
+                    result.put("step2SnapshotRead", "failed");
+                    result.put("failAt", "STEP2_SNAPSHOT");
                     return Mono.empty();
                 }))
             .then();
 
         return owners.then(Mono.defer(() -> {
             result.put("authorCandidates", new ArrayList<>(candidates));
+            result.put("allAuthors", new ArrayList<>(candidates));
             result.put("authorCandidateCount", candidates.size());
+            result.put("step3AuthorCandidates", "ok");
             result.put("contentLoadMethod", descriptor.page()
                 ? "Snapshot(base/head)+ContentWrapper.patchSnapshot"
                 : "PostContentService.getHeadContent");
@@ -145,11 +159,19 @@ public class ActivityTracker {
                     result.put("rawContentLength", raw == null ? 0 : raw.length());
                     result.put("normalizedLength", normalized.length());
                     result.put("unitCount", countUnits(normalized));
+                    result.put("step4ContentRead", "ok");
+                    result.put("step5ContentCount", "ok");
+                    result.put("activityWouldGenerate", !normalized.isBlank());
+                    result.put("step6ActivityCandidate", !normalized.isBlank() ? "ok" : "skipped-empty");
                     return result;
                 })
                 .switchIfEmpty(Mono.fromSupplier(() -> {
                     result.put("contentSuccess", false);
                     result.put("contentEmptyPublisher", true);
+                    result.put("step4ContentRead", "empty");
+                    result.put("failAt", "STEP4_CONTENT");
+                    result.put("activityWouldGenerate", false);
+                    result.put("step6ActivityCandidate", "skipped");
                     return result;
                 }))
                 .onErrorResume(error -> {
@@ -158,6 +180,10 @@ public class ActivityTracker {
                     result.put("contentErrorMessage", String.valueOf(error.getMessage()));
                     result.put("contentRootCause", diagnosticRootCause(error));
                     result.put("contentStackTrace", diagnosticStackTrace(error));
+                    result.put("step4ContentRead", "failed");
+                    result.put("failAt", "STEP4_CONTENT");
+                    result.put("activityWouldGenerate", false);
+                    result.put("step6ActivityCandidate", "skipped");
                     return Mono.just(result);
                 });
         }));

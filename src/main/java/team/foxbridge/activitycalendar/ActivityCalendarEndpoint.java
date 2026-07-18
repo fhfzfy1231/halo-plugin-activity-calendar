@@ -93,7 +93,7 @@ public class ActivityCalendarEndpoint implements CustomEndpoint {
         int current = Year.now().getValue();
         int year = request.queryParam("year").map(this::parseYear).orElse(current);
         Map<String, Object> report = new LinkedHashMap<>();
-        report.put("pluginVersion", "2.0.0-debug.2");
+        report.put("pluginVersion", "2.0.0-debug.3");
         report.put("year", year);
         report.put("status", "running");
 
@@ -168,8 +168,14 @@ public class ActivityCalendarEndpoint implements CustomEndpoint {
                 long failed = items.size() - success;
                 report.put("contentSuccessCount", success);
                 report.put("contentFailureCount", failed);
+                report.put("snapshotReadFailureItems", items.stream()
+                    .filter(item -> "failed".equals(item.get("step2SnapshotRead")))
+                    .count());
                 report.put("multiAuthorCandidateItems", items.stream()
                     .filter(item -> ((Number) item.getOrDefault("authorCandidateCount", 0)).intValue() > 1)
+                    .count());
+                report.put("activityCandidateCount", items.stream()
+                    .filter(item -> Boolean.TRUE.equals(item.get("activityWouldGenerate")))
                     .count());
             })
             .then();
