@@ -182,14 +182,14 @@ public class ActivityCalendarEndpoint implements CustomEndpoint {
             .then();
     }
 
-\n    private Mono<Void> diagnosticBaselineSpec(int year, Map<String,Object> report) {
+    private Mono<Void> diagnosticBaselineSpec(int year, Map<String,Object> report) {
         report.put("phase", "baseline-spec-generation");
         return tracker.diagnosticBaselineForYear(year, 20)
             .collectList()
             .doOnNext(list -> report.put("baselineSpecDiagnostics", list))
             .then();
     }
-\n    private Mono<Void> diagnosticBaseline(int year, Map<String, Object> report) {
+    private Mono<Void> diagnosticBaseline(int year, Map<String, Object> report) {
         report.put("phase", "baseline-for-year");
         return tracker.baselineForYear(year)
             .collectList()
