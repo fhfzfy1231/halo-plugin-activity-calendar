@@ -11,6 +11,9 @@ import java.util.Comparator;
 import java.util.List;
 import java.util.HexFormat;
 import java.util.Map;
+import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
+import java.util.Set;
 import java.util.Objects;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.regex.Matcher;
@@ -72,6 +75,107 @@ public class ActivityTracker {
                         normalize(content.getContent()), user.username(), user.displayName()))))
                 .filter(Objects::nonNull)
                 .onErrorResume(error -> Mono.empty()));
+    }
+
+
+    /**
+     * Debug v2 probe: inspect content loading and contributor candidates without hiding failures.
+     * A Halo post can involve multiple authors/editors, so this diagnostic intentionally reports
+     * all author candidates visible from the Post owner and snapshot owners instead of assuming
+     * a single contributor.
+     */
+    public Flux<Map<String, Object>> diagnosticContentForYear(int year, int limit) {
+        return Flux.concat(postDescriptors(), pageDescriptors())
+            .filter(item -> historicalDate(item).startsWith(year + "-"))
+            .take(Math.max(1, limit))
+            .concatMap(this::diagnosticContentItem);
+    }
+
+    private Mono<Map<String, Object>> diagnosticContentItem(ContentDescriptor descriptor) {
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("key", descriptor.key());
+        result.put("name", descriptor.name());
+        result.put("type", descriptor.page() ? "SinglePage" : "Post");
+        result.put("published", descriptor.published());
+        result.put("date", historicalDate(descriptor));
+        result.put("postOwner", descriptor.owner());
+        result.put("headSnapshot", descriptor.headSnapshot());
+        result.put("baseSnapshot", descriptor.baseSnapshot());
+        result.put("releaseSnapshot", descriptor.releaseSnapshot());
+
+        Set<String> candidates = new LinkedHashSet<>();
+        if (!isBlank(descriptor.owner())) {
+            candidates.add(descriptor.owner());
+        }
+
+        Mono<Void> owners = Flux.just(
+                descriptor.baseSnapshot(),
+                descriptor.headSnapshot(),
+                descriptor.releaseSnapshot())
+            .filter(id -> !isBlank(id))
+            .distinct()
+            .concatMap(id -> client.fetch(Snapshot.class, id)
+                .doOnNext(snapshot -> {
+                    String owner = snapshot.getSpec() == null ? null : snapshot.getSpec().getOwner();
+                    if (!isBlank(owner)) {
+                        candidates.add(owner);
+                    }
+                    result.put("snapshotOwner:" + id, owner);
+                })
+                .switchIfEmpty(Mono.fromRunnable(() ->
+                    result.put("snapshotMissing:" + id, true)))
+                .onErrorResume(error -> {
+                    result.put("snapshotError:" + id,
+                        error.getClass().getName() + ": " + String.valueOf(error.getMessage()));
+                    return Mono.empty();
+                }))
+            .then();
+
+        return owners.then(Mono.defer(() -> {
+            result.put("authorCandidates", new ArrayList<>(candidates));
+            result.put("authorCandidateCount", candidates.size());
+            result.put("contentLoadMethod", descriptor.page()
+                ? "Snapshot(base/head)+ContentWrapper.patchSnapshot"
+                : "PostContentService.getHeadContent");
+            return loadContent(descriptor)
+                .map(content -> {
+                    String raw = content == null ? "" : content.getContent();
+                    String normalized = normalize(raw);
+                    result.put("contentSuccess", true);
+                    result.put("rawContentLength", raw == null ? 0 : raw.length());
+                    result.put("normalizedLength", normalized.length());
+                    result.put("unitCount", countUnits(normalized));
+                    return result;
+                })
+                .switchIfEmpty(Mono.fromSupplier(() -> {
+                    result.put("contentSuccess", false);
+                    result.put("contentEmptyPublisher", true);
+                    return result;
+                }))
+                .onErrorResume(error -> {
+                    result.put("contentSuccess", false);
+                    result.put("contentErrorClass", error.getClass().getName());
+                    result.put("contentErrorMessage", String.valueOf(error.getMessage()));
+                    result.put("contentRootCause", diagnosticRootCause(error));
+                    result.put("contentStackTrace", diagnosticStackTrace(error));
+                    return Mono.just(result);
+                });
+        }));
+    }
+
+    private static String diagnosticRootCause(Throwable error) {
+        Throwable root = error;
+        while (root.getCause() != null && root.getCause() != root) {
+            root = root.getCause();
+        }
+        return root.getClass().getName() + ": " + String.valueOf(root.getMessage());
+    }
+
+    private static String diagnosticStackTrace(Throwable error) {
+        java.io.StringWriter writer = new java.io.StringWriter();
+        error.printStackTrace(new java.io.PrintWriter(writer));
+        String trace = writer.toString();
+        return trace.length() > 12000 ? trace.substring(0, 12000) : trace;
     }
 
     public List<ActivityRecord.Spec> runtimeForYear(int year) {

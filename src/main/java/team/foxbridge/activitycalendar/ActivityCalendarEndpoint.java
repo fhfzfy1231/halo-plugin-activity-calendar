@@ -93,12 +93,13 @@ public class ActivityCalendarEndpoint implements CustomEndpoint {
         int current = Year.now().getValue();
         int year = request.queryParam("year").map(this::parseYear).orElse(current);
         Map<String, Object> report = new LinkedHashMap<>();
-        report.put("pluginVersion", "2.0.0-debug.1");
+        report.put("pluginVersion", "2.0.0-debug.2");
         report.put("year", year);
         report.put("status", "running");
 
         return diagnosticCountPosts(report)
             .then(diagnosticCountPages(report))
+            .then(diagnosticContent(year, report))
             .then(diagnosticBaseline(year, report))
             .then(Mono.fromSupplier(() -> {
                 report.put("status", "completed");
@@ -150,6 +151,27 @@ public class ActivityCalendarEndpoint implements CustomEndpoint {
                 Comparator.comparing(page -> page.getMetadata().getName()))
             .collectList()
             .doOnNext(pages -> report.put("pageCount", pages.size()))
+            .then();
+    }
+
+
+    private Mono<Void> diagnosticContent(int year, Map<String, Object> report) {
+        report.put("phase", "content-and-authors");
+        return tracker.diagnosticContentForYear(year, 20)
+            .collectList()
+            .doOnNext(items -> {
+                report.put("contentDiagnosticCount", items.size());
+                report.put("contentDiagnostics", items);
+                long success = items.stream()
+                    .filter(item -> Boolean.TRUE.equals(item.get("contentSuccess")))
+                    .count();
+                long failed = items.size() - success;
+                report.put("contentSuccessCount", success);
+                report.put("contentFailureCount", failed);
+                report.put("multiAuthorCandidateItems", items.stream()
+                    .filter(item -> ((Number) item.getOrDefault("authorCandidateCount", 0)).intValue() > 1)
+                    .count());
+            })
             .then();
     }
 
