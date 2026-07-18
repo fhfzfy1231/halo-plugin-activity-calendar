@@ -1,0 +1,59 @@
+apiVersion: v1alpha1
+kind: Setting
+metadata:
+  name: activity-calendar-settings
+spec:
+  forms:
+    - group: basic
+      label: 活跃度计算
+      formSchema:
+        - $formkit: number
+          name: addedWeight
+          label: 每个新增字的分数
+          value: 1
+          min: 0
+          step: 0.1
+          validation: required|number|min:0
+        - $formkit: number
+          name: modifiedWeight
+          label: 每个修改字的分数
+          value: 0.5
+          min: 0
+          step: 0.1
+          validation: required|number|min:0
+        - $formkit: number
+          name: publishScore
+          label: 首次发布内容的分数
+          value: 800
+          min: 0
+          validation: required|number|min:0
+        - $formkit: number
+          name: republishScore
+          label: 更新已发布内容的分数
+          value: 200
+          min: 0
+          validation: required|number|min:0
+        - $formkit: number
+          name: level1
+          label: 浅绿色起始分数
+          value: 1
+          min: 1
+          validation: required|number|min:1
+        - $formkit: number
+          name: level2
+          label: 第二档起始分数
+          value: 200
+          min: 1
+          validation: required|number|min:1
+        - $formkit: number
+          name: level3
+          label: 第三档起始分数
+          value: 600
+          min: 1
+          validation: required|number|min:1
+        - $formkit: number
+          name: level4
+          label: 深绿色起始分数
+          value: 1500
+          min: 1
+          validation: required|number|min:1

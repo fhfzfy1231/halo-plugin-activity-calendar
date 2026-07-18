@@ -1,0 +1,25 @@
+# Refer https://docs.halo.run/developer-guide/plugin/basics/manifest
+
+apiVersion: plugin.halo.run/v1alpha1
+kind: Plugin
+metadata:
+  # The name defines how the plugin is invoked, A unique name
+  name: activity-calendar
+spec:
+  enabled: true
+  version: 1.0.0
+  requires: ">=2.25.0"
+  author:
+    name: Akagi_Zen
+    website: https://github.com/fhfzfy1231
+  logo: logo.png
+  settingName: activity-calendar-settings
+  configMapName: activity-calendar-configmap
+  homepage: https://github.com/fhfzfy1231/halo-plugin-activity-calendar#readme
+  repo: https://github.com/fhfzfy1231/halo-plugin-activity-calendar
+  issues: https://github.com/fhfzfy1231/halo-plugin-activity-calendar/issues
+  displayName: "全站创作活跃日历"
+  description: "以 GitHub 贡献日历的形式展示全站作者每日创作活跃度。"
+  license:
+    - name: "MIT"
+      url: "https://github.com/fhfzfy1231/halo-plugin-activity-calendar/blob/main/LICENSE"
