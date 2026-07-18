@@ -67,6 +67,11 @@ public class ActivityTracker {
      * This path does not depend on custom ActivityRecord persistence, so the calendar
      * can still show existing content even if historical record writes fail.
      */
+    /** Returns diagnostics collected during baseline generation. */
+    public List<Map<String, Object>> baselineErrors() {
+        return List.copyOf(baselineErrors);
+    }
+
     public Flux<ActivityRecord.Spec> baselineForYear(int year) {
         return Flux.concat(postDescriptors(), pageDescriptors())
             .filter(item -> historicalDate(item).startsWith(year + "-"))
