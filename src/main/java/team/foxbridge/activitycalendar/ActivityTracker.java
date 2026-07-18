@@ -6,7 +6,9 @@ import java.time.Duration;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.time.ZoneId;
+import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.List;
 import java.util.HexFormat;
 import java.util.Map;
 import java.util.Objects;
@@ -45,6 +47,7 @@ public class ActivityTracker {
     private final PostContentService postContentService;
     private final SettingFetcher settingFetcher;
     private final Map<String, ContentState> states = new ConcurrentHashMap<>();
+    private final Map<String, ActivityRecord.Spec> runtimeRecords = new ConcurrentHashMap<>();
     private Disposable trackingTask;
 
     public ActivityTracker(ReactiveExtensionClient client, PostContentService postContentService,
@@ -54,6 +57,62 @@ public class ActivityTracker {
         this.settingFetcher = settingFetcher;
     }
 
+
+    /**
+     * Builds a reliable read-only baseline directly from Halo content.
+     * This path does not depend on custom ActivityRecord persistence, so the calendar
+     * can still show existing content even if historical record writes fail.
+     */
+    public Flux<ActivityRecord.Spec> baselineForYear(int year) {
+        return Flux.concat(postDescriptors(), pageDescriptors())
+            .filter(item -> historicalDate(item).startsWith(year + "-"))
+            .concatMap(item -> loadContent(item)
+                .flatMap(content -> loadContributor(item)
+                    .map(user -> baselineSpec(item, new LoadedContent(
+                        normalize(content.getContent()), user.username(), user.displayName()))))
+                .filter(Objects::nonNull)
+                .onErrorResume(error -> Mono.empty()));
+    }
+
+    public List<ActivityRecord.Spec> runtimeForYear(int year) {
+        String prefix = year + "-";
+        return runtimeRecords.values().stream()
+            .filter(spec -> spec.getDate() != null && spec.getDate().startsWith(prefix))
+            .map(ActivityTracker::copySpec)
+            .toList();
+    }
+
+    private ActivityRecord.Spec baselineSpec(ContentDescriptor descriptor, LoadedContent loaded) {
+        if (loaded.text().isBlank()) return null;
+        long added = countUnits(loaded.text());
+        int published = descriptor.published() ? 1 : 0;
+        ActivitySettings settings = settings();
+        long score = Math.round(added * settings.getAddedWeight()
+            + (long) published * settings.getPublishScore());
+        ActivityRecord.Spec spec = new ActivityRecord.Spec();
+        spec.setDate(historicalDate(descriptor));
+        spec.setUsername(loaded.username());
+        spec.setDisplayName(loaded.displayName());
+        spec.setAddedWords(added);
+        spec.setModifiedWords(0);
+        spec.setPublishedCount(published);
+        spec.setRepublishedCount(0);
+        spec.setScore(score);
+        return spec;
+    }
+
+    private static ActivityRecord.Spec copySpec(ActivityRecord.Spec source) {
+        ActivityRecord.Spec spec = new ActivityRecord.Spec();
+        spec.setDate(source.getDate());
+        spec.setUsername(source.getUsername());
+        spec.setDisplayName(source.getDisplayName());
+        spec.setAddedWords(source.getAddedWords());
+        spec.setModifiedWords(source.getModifiedWords());
+        spec.setPublishedCount(source.getPublishedCount());
+        spec.setRepublishedCount(source.getRepublishedCount());
+        spec.setScore(source.getScore());
+        return spec;
+    }
 
     /**
      * Rebuild activity records from existing Halo contents.
@@ -242,6 +301,19 @@ public class ActivityTracker {
             + (long) published * settings.getPublishScore()
             + (long) republished * settings.getRepublishScore());
 
+        runtimeRecords.compute(recordName, (key, existing) -> {
+            ActivityRecord.Spec spec = existing == null ? new ActivityRecord.Spec() : existing;
+            spec.setDate(date);
+            spec.setUsername(username);
+            spec.setDisplayName(displayName);
+            spec.setAddedWords(spec.getAddedWords() + added);
+            spec.setModifiedWords(spec.getModifiedWords() + modified);
+            spec.setPublishedCount(spec.getPublishedCount() + published);
+            spec.setRepublishedCount(spec.getRepublishedCount() + republished);
+            spec.setScore(spec.getScore() + score);
+            return spec;
+        });
+
         return Mono.defer(() -> client.fetch(ActivityRecord.class, recordName)
                 .flatMap(record -> {
                     ActivityRecord.Spec spec = record.getSpec();
@@ -256,6 +328,7 @@ public class ActivityTracker {
                 .switchIfEmpty(Mono.defer(() -> client.create(newRecord(recordName, date,
                     username, displayName, added, modified, published, republished, score)))))
             .retryWhen(Retry.backoff(4, Duration.ofMillis(100)))
+            .onErrorResume(error -> Mono.empty())
             .then();
     }
 

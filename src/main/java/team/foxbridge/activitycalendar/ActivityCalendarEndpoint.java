@@ -44,36 +44,30 @@ public class ActivityCalendarEndpoint implements CustomEndpoint {
         Comparator<ActivityRecord> order = Comparator
             .comparing(record -> record.getSpec().getDate());
 
-        return client.list(ActivityRecord.class,
-                record -> record.getSpec() != null
-                    && record.getSpec().getDate() != null
-                    && record.getSpec().getDate().startsWith(prefix), order)
+        return tracker.baselineForYear(year)
             .collectList()
-            .map(records -> aggregate(year, records))
+            .map(baseline -> {
+                List<ActivityRecord.Spec> specs = new ArrayList<>(baseline);
+                specs.addAll(tracker.runtimeForYear(year));
+                return aggregateSpecs(year, specs);
+            })
             .flatMap(body -> ServerResponse.ok()
-                .cacheControl(CacheControl.maxAge(java.time.Duration.ofSeconds(60)).cachePublic())
+                .cacheControl(CacheControl.noStore())
                 .bodyValue(body))
             .onErrorResume(error -> ServerResponse.ok()
+                .cacheControl(CacheControl.noStore())
                 .bodyValue(Map.of(
                     "year", year,
                     "totalScore", 0,
                     "days", List.of(),
-                    "message", "Activity calendar data unavailable")));
+                    "message", "Activity calendar scan failed: " + error.getClass().getSimpleName())));
     }
 
-    private Mono<ServerResponse> rebuildHistory(ServerRequest request) {
-        return tracker.rebuildHistory()
-            .then(ServerResponse.ok().bodyValue(Map.of(
-                "success", true,
-                "message", "Historical activity rebuild completed"
-            )));
-    }
-
-    private Map<String, Object> aggregate(int year, List<ActivityRecord> records) {
+    private Map<String, Object> aggregateSpecs(int year, List<ActivityRecord.Spec> specs) {
         Map<String, DaySummary> days = new TreeMap<>();
         long totalScore = 0;
-        for (ActivityRecord record : records) {
-            ActivityRecord.Spec spec = record.getSpec();
+        for (ActivityRecord.Spec spec : specs) {
+            if (spec == null || spec.getDate() == null) continue;
             DaySummary day = days.computeIfAbsent(spec.getDate(), ignored -> new DaySummary());
             day.score += spec.getScore();
             totalScore += spec.getScore();
@@ -87,7 +81,18 @@ public class ActivityCalendarEndpoint implements CustomEndpoint {
             user.put("score", spec.getScore());
             day.users.add(user);
         }
+        return finishAggregate(year, totalScore, days);
+    }
 
+    private Mono<ServerResponse> rebuildHistory(ServerRequest request) {
+        return tracker.rebuildHistory()
+            .then(ServerResponse.ok().bodyValue(Map.of(
+                "success", true,
+                "message", "Historical activity rebuild completed"
+            )));
+    }
+
+    private Map<String, Object> finishAggregate(int year, long totalScore, Map<String, DaySummary> days) {
         ActivitySettings settings = tracker.settings();
         List<Map<String, Object>> dayList = new ArrayList<>();
         days.forEach((date, summary) -> {
