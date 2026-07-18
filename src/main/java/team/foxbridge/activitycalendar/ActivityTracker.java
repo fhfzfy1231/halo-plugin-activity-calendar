@@ -22,6 +22,7 @@ import org.springframework.stereotype.Component;
 import reactor.core.Disposable;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
+import reactor.core.scheduler.Schedulers;
 import reactor.util.retry.Retry;
 import run.halo.app.content.ContentWrapper;
 import run.halo.app.content.PostContentService;
@@ -73,23 +74,33 @@ public class ActivityTracker {
     }
 
     public Flux<ActivityRecord.Spec> baselineForYear(int year) {
-        return Flux.concat(postDescriptors(), pageDescriptors())
-            .filter(item -> historicalDate(item).startsWith(year + "-"))
-            .concatMap(item -> loadContent(item)
-                .flatMap(content -> loadContributor(item)
-                    .flatMap(user -> {
-                        ActivityRecord.Spec spec = baselineSpec(item, new LoadedContent(
-                            normalize(content.getContent()), user.username(), user.displayName()));
-                        return spec == null ? Mono.empty() : Mono.just(spec);
-                    }))
-                .onErrorResume(error -> {
-                    Map<String,Object> diagnostic = new LinkedHashMap<>();
-                    diagnostic.put("errorClass", error.getClass().getName());
-                    diagnostic.put("errorMessage", String.valueOf(error.getMessage()));
-                    diagnostic.put("rootCause", error.getCause() == null ? null : error.getCause().toString());
-                    baselineErrors.add(diagnostic);
-                    return Mono.empty();
-                }));
+        return settings().flatMapMany(settings -> baselineForYear(year, settings));
+    }
+
+    Flux<ActivityRecord.Spec> baselineForYear(int year, ActivitySettings settings) {
+        return Flux.defer(() -> {
+            baselineErrors.clear();
+            return Flux.concat(postDescriptors(), pageDescriptors())
+                .filter(item -> historicalDate(item).startsWith(year + "-"))
+                .concatMap(item -> loadContent(item)
+                    .flatMap(content -> loadContributor(item)
+                        .flatMap(user -> {
+                            ActivityRecord.Spec spec = baselineSpec(item, new LoadedContent(
+                                normalize(content.getContent()), user.username(),
+                                user.displayName()), settings);
+                            return spec == null ? Mono.empty() : Mono.just(spec);
+                        }))
+                    .onErrorResume(error -> {
+                        Map<String, Object> diagnostic = new LinkedHashMap<>();
+                        diagnostic.put("content", item.key());
+                        diagnostic.put("errorClass", error.getClass().getName());
+                        diagnostic.put("errorMessage", String.valueOf(error.getMessage()));
+                        diagnostic.put("rootCause", error.getCause() == null
+                            ? null : error.getCause().toString());
+                        baselineErrors.add(diagnostic);
+                        return Mono.empty();
+                    }));
+        });
     }
 
     /**
@@ -97,6 +108,12 @@ public class ActivityTracker {
      * This checks why valid content is not converted into ActivityRecord.Spec.
      */
     public Flux<Map<String, Object>> diagnosticBaselineForYear(int year, int limit) {
+        return settings().flatMapMany(settings ->
+            diagnosticBaselineForYear(year, limit, settings));
+    }
+
+    private Flux<Map<String, Object>> diagnosticBaselineForYear(int year, int limit,
+        ActivitySettings settings) {
         return Flux.concat(postDescriptors(), pageDescriptors())
             .filter(item -> historicalDate(item).startsWith(year + "-"))
             .take(Math.max(1, limit))
@@ -118,7 +135,7 @@ public class ActivityTracker {
                             result.put("textLength", loaded.text().length());
                             result.put("username", loaded.username());
 
-                            ActivityRecord.Spec spec = baselineSpec(item, loaded);
+                            ActivityRecord.Spec spec = baselineSpec(item, loaded, settings);
 
                             result.put("baselineSpecReturnedNull", spec == null);
                             if (spec != null) {
@@ -275,11 +292,11 @@ public class ActivityTracker {
             .toList();
     }
 
-    private ActivityRecord.Spec baselineSpec(ContentDescriptor descriptor, LoadedContent loaded) {
+    private ActivityRecord.Spec baselineSpec(ContentDescriptor descriptor, LoadedContent loaded,
+        ActivitySettings settings) {
         if (loaded.text().isBlank()) return null;
         long added = countUnits(loaded.text());
         int published = descriptor.published() ? 1 : 0;
-        ActivitySettings settings = settings();
         long score = Math.round(added * settings.getAddedWeight()
             + (long) published * settings.getPublishScore());
         ActivityRecord.Spec spec = new ActivityRecord.Spec();
@@ -315,16 +332,18 @@ public class ActivityTracker {
      * Future edits continue to be tracked incrementally.
      */
     public Mono<Void> rebuildHistory() {
-        Flux<ContentDescriptor> posts = postDescriptors();
-        Flux<ContentDescriptor> pages = pageDescriptors();
-        return Flux.concat(posts, pages)
-            .concatMap(item -> loadContent(item)
-                .flatMap(content -> loadContributor(item)
-                    .flatMap(user -> seedContentActivity(item,
-                        new LoadedContent(normalize(content.getContent()),
-                            user.username(), user.displayName()))))
-                .onErrorResume(error -> Mono.empty()))
-            .then();
+        return settings().flatMap(settings -> {
+            Flux<ContentDescriptor> posts = postDescriptors();
+            Flux<ContentDescriptor> pages = pageDescriptors();
+            return Flux.concat(posts, pages)
+                .concatMap(item -> loadContent(item)
+                    .flatMap(content -> loadContributor(item)
+                        .flatMap(user -> seedContentActivity(item,
+                            new LoadedContent(normalize(content.getContent()),
+                                user.username(), user.displayName()), settings)))
+                    .onErrorResume(error -> Mono.empty()))
+                .then();
+        });
     }
 
     public synchronized void startTracking() {
@@ -454,6 +473,11 @@ public class ActivityTracker {
     }
 
     private Mono<Void> seedContentActivity(ContentDescriptor descriptor, LoadedContent loaded) {
+        return settings().flatMap(settings -> seedContentActivity(descriptor, loaded, settings));
+    }
+
+    private Mono<Void> seedContentActivity(ContentDescriptor descriptor, LoadedContent loaded,
+        ActivitySettings settings) {
         if (loaded.text().isBlank()) {
             return Mono.empty();
         }
@@ -462,7 +486,6 @@ public class ActivityTracker {
             + shortHash(descriptor.key() + "/" + loaded.username());
         long added = countUnits(loaded.text());
         int published = descriptor.published() ? 1 : 0;
-        ActivitySettings settings = settings();
         long score = Math.round(added * settings.getAddedWeight()
             + (long) published * settings.getPublishScore());
 
@@ -486,9 +509,14 @@ public class ActivityTracker {
 
     private Mono<Void> addActivity(String username, String displayName, long added, long modified,
         int published, int republished) {
+        return settings().flatMap(settings -> addActivity(username, displayName, added, modified,
+            published, republished, settings));
+    }
+
+    private Mono<Void> addActivity(String username, String displayName, long added, long modified,
+        int published, int republished, ActivitySettings settings) {
         String date = LocalDate.now(ZoneId.systemDefault()).toString();
         String recordName = date.replace("-", "") + "-" + shortHash(username);
-        ActivitySettings settings = settings();
         long score = Math.round(added * settings.getAddedWeight()
             + modified * settings.getModifiedWeight()
             + (long) published * settings.getPublishScore()
@@ -545,9 +573,14 @@ public class ActivityTracker {
         return record;
     }
 
-    ActivitySettings settings() {
-        return settingFetcher.fetch("basic", ActivitySettings.class)
-            .orElseGet(ActivitySettings::new);
+    Mono<ActivitySettings> settings() {
+        // SettingFetcher is a synchronous API and internally blocks. Calendar requests run on
+        // Reactor/Netty threads, where blocking is rejected by Halo. Isolate this one call on the
+        // bounded-elastic scheduler, then keep the rest of the scan fully reactive.
+        return Mono.fromCallable(() -> settingFetcher.fetch("basic", ActivitySettings.class)
+                .orElseGet(ActivitySettings::new))
+            .subscribeOn(Schedulers.boundedElastic())
+            .onErrorReturn(new ActivitySettings());
     }
 
     static TextDelta calculateDelta(String before, String after) {

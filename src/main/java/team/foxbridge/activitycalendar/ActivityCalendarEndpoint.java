@@ -45,17 +45,15 @@ public class ActivityCalendarEndpoint implements CustomEndpoint {
     private Mono<ServerResponse> calendar(ServerRequest request) {
         int current = Year.now().getValue();
         int year = request.queryParam("year").map(this::parseYear).orElse(current);
-        String prefix = year + "-";
-        Comparator<ActivityRecord> order = Comparator
-            .comparing(record -> record.getSpec().getDate());
 
-        return tracker.baselineForYear(year)
-            .collectList()
-            .map(baseline -> {
-                List<ActivityRecord.Spec> specs = new ArrayList<>(baseline);
-                specs.addAll(tracker.runtimeForYear(year));
-                return aggregateSpecs(year, specs);
-            })
+        return tracker.settings()
+            .flatMap(settings -> tracker.baselineForYear(year, settings)
+                .collectList()
+                .map(baseline -> {
+                    List<ActivityRecord.Spec> specs = new ArrayList<>(baseline);
+                    specs.addAll(tracker.runtimeForYear(year));
+                    return aggregateSpecs(year, specs, settings);
+                }))
             .flatMap(body -> ServerResponse.ok()
                 .cacheControl(CacheControl.noStore())
                 .bodyValue(body))
@@ -68,7 +66,8 @@ public class ActivityCalendarEndpoint implements CustomEndpoint {
                     "message", "Activity calendar scan failed: " + error.getClass().getSimpleName())));
     }
 
-    private Map<String, Object> aggregateSpecs(int year, List<ActivityRecord.Spec> specs) {
+    private Map<String, Object> aggregateSpecs(int year, List<ActivityRecord.Spec> specs,
+        ActivitySettings settings) {
         Map<String, DaySummary> days = new TreeMap<>();
         long totalScore = 0;
         for (ActivityRecord.Spec spec : specs) {
@@ -86,14 +85,14 @@ public class ActivityCalendarEndpoint implements CustomEndpoint {
             user.put("score", spec.getScore());
             day.users.add(user);
         }
-        return finishAggregate(year, totalScore, days);
+        return finishAggregate(year, totalScore, days, settings);
     }
 
     private Mono<ServerResponse> debug(ServerRequest request) {
         int current = Year.now().getValue();
         int year = request.queryParam("year").map(this::parseYear).orElse(current);
         Map<String, Object> report = new LinkedHashMap<>();
-        report.put("pluginVersion", "2.1.0");
+        report.put("pluginVersion", "2.1.1");
         report.put("year", year);
         report.put("status", "running");
 
@@ -237,8 +236,8 @@ public class ActivityCalendarEndpoint implements CustomEndpoint {
             )));
     }
 
-    private Map<String, Object> finishAggregate(int year, long totalScore, Map<String, DaySummary> days) {
-        ActivitySettings settings = tracker.settings();
+    private Map<String, Object> finishAggregate(int year, long totalScore,
+        Map<String, DaySummary> days, ActivitySettings settings) {
         List<Map<String, Object>> dayList = new ArrayList<>();
         days.forEach((date, summary) -> {
             summary.users.sort(Comparator.comparingLong(user ->

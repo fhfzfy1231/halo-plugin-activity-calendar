@@ -43,7 +43,7 @@
 
 ## 安装
 
-1. 下载 Release 中的 `halo-plugin-activity-calendar-1.0.1.jar`。
+1. 下载 Release 中的 `plugin-activity-calendar-2.1.1.jar`。
 2. 进入 Halo 后台的“插件”页面，点击右上角“安装插件”。
 3. 上传 JAR，安装并启用。
 
@@ -85,3 +85,10 @@ git push -u origin main
 - 修复前台接口异常时导致活跃度数据加载失败的问题。
 - 增强游客访问稳定性和空数据处理。
 - 修复版本号并优化发布流程。
+
+## v2.1.1 更新
+
+- 修复历史基线统计在线程 `reactor-tcp-epoll` 上读取插件设置时触发阻塞异常的问题。
+- 设置只在每次统计请求开始时异步读取一次，避免逐篇文章重复读取。
+- 修复历史内容能够解析、但 `baselineRecordCount` 和 `totalScore` 始终为 0 的问题。
+- 统一插件清单、调试接口和 Gradle 构建产物的版本号为 2.1.1。
