@@ -78,10 +78,15 @@ public class ActivityTracker {
     }
 
     Flux<ActivityRecord.Spec> baselineForYear(int year, ActivitySettings settings) {
+        return baselineForYearRange(year, year, settings);
+    }
+
+    Flux<ActivityRecord.Spec> baselineForYearRange(int oldestYear, int newestYear,
+        ActivitySettings settings) {
         return Flux.defer(() -> {
             baselineErrors.clear();
             return Flux.concat(postDescriptors(), pageDescriptors())
-                .filter(item -> historicalDate(item).startsWith(year + "-"))
+                .filter(item -> isInYearRange(historicalDate(item), oldestYear, newestYear))
                 .concatMap(item -> loadContent(item)
                     .flatMap(content -> loadContributor(item)
                         .flatMap(user -> {
@@ -285,9 +290,12 @@ public class ActivityTracker {
     }
 
     public List<ActivityRecord.Spec> runtimeForYear(int year) {
-        String prefix = year + "-";
+        return runtimeForYearRange(year, year);
+    }
+
+    List<ActivityRecord.Spec> runtimeForYearRange(int oldestYear, int newestYear) {
         return runtimeRecords.values().stream()
-            .filter(spec -> spec.getDate() != null && spec.getDate().startsWith(prefix))
+            .filter(spec -> isInYearRange(spec.getDate(), oldestYear, newestYear))
             .map(ActivityTracker::copySpec)
             .toList();
     }
@@ -640,6 +648,18 @@ public class ActivityTracker {
 
     private static boolean isBlank(String value) {
         return value == null || value.isBlank();
+    }
+
+    private static boolean isInYearRange(String date, int oldestYear, int newestYear) {
+        if (date == null || date.length() < 4) {
+            return false;
+        }
+        try {
+            int year = Integer.parseInt(date.substring(0, 4));
+            return year >= oldestYear && year <= newestYear;
+        } catch (NumberFormatException ignored) {
+            return false;
+        }
     }
 
     record ContentDescriptor(String key, String name, String owner, String headSnapshot,

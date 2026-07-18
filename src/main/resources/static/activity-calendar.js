@@ -1,7 +1,9 @@
 (() => {
-  const API = '/apis/api.activity.foxbridge.team/v1alpha1/calendar';
+  const API = '/apis/api.activity.foxbridge.team/v1alpha2/calendar';
+  const EMBEDDED_DATA_ID = 'halo-activity-calendar-data';
   const months = ['1月', '2月', '3月', '4月', '5月', '6月', '7月', '8月', '9月', '10月', '11月', '12月'];
   const cache = new Map();
+  let embeddedData;
 
   const node = (tag, className, text) => {
     const el = document.createElement(tag);
@@ -16,10 +18,24 @@
 
   function fetchYear(year) {
     if (!cache.has(year)) {
-      cache.set(year, fetch(`${API}?year=${year}`, { credentials: 'same-origin' }).then(response => {
-        if (!response.ok) throw new Error(`接口请求失败 HTTP ${response.status}`);
-        return response.json();
-      }));
+      if (embeddedData === undefined) {
+        try {
+          const source = document.getElementById(EMBEDDED_DATA_ID);
+          embeddedData = source ? JSON.parse(source.textContent || '{}') : {};
+        } catch (_) {
+          embeddedData = {};
+        }
+      }
+      const embeddedYear = embeddedData?.years?.[String(year)];
+      cache.set(year, embeddedYear
+        ? Promise.resolve(embeddedYear)
+        : fetch(`${API}?year=${year}`, { credentials: 'same-origin' }).then(response => {
+          const type = response.headers.get('content-type') || '';
+          if (!response.ok || response.redirected || !type.includes('application/json')) {
+            throw new Error(`接口请求失败 HTTP ${response.status}`);
+          }
+          return response.json();
+        }));
     }
     return cache.get(year);
   }
