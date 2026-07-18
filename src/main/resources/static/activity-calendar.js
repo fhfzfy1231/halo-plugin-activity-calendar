@@ -135,7 +135,13 @@
     const years = node('div', 'hac-years');
     const tooltip = node('div', 'hac-tooltip');
     tooltip.hidden = true;
-    root.append(shell, tooltip);
+    root.append(shell);
+    // Mount the tooltip directly under <body>. Some Halo themes apply transform/filter
+    // to content containers; a position:fixed element inside such an ancestor is then
+    // positioned relative to that ancestor instead of the viewport, causing a large offset.
+    // Portaling it to body keeps getBoundingClientRect() and fixed coordinates in the
+    // same viewport coordinate system.
+    document.body.append(tooltip);
     shell.append(card, years);
 
     const current = Number(root.dataset.year) || new Date().getFullYear();
