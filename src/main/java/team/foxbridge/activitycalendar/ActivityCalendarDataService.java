@@ -15,9 +15,9 @@ import reactor.core.publisher.Mono;
 @Component
 public class ActivityCalendarDataService {
 
-    static final String PLUGIN_VERSION = "2.1.3";
+    static final String PLUGIN_VERSION = "2.1.4";
     static final String API_VERSION = "v1alpha2";
-    static final String BUILD_SIGNATURE = "hac-2.1.3-213";
+    static final String BUILD_SIGNATURE = "hac-2.1.4-214";
     private static final Duration PUBLIC_CACHE_TTL = Duration.ofSeconds(15);
 
     private final ActivityTracker tracker;
@@ -108,26 +108,23 @@ public class ActivityCalendarDataService {
             DaySummary day = days.computeIfAbsent(spec.getDate(), ignored -> new DaySummary());
             day.score += spec.getScore();
             totalScore += spec.getScore();
-            Map<String, Object> user = new LinkedHashMap<>();
-            user.put("username", spec.getUsername());
-            user.put("displayName", spec.getDisplayName());
-            user.put("addedWords", spec.getAddedWords());
-            user.put("modifiedWords", spec.getModifiedWords());
-            user.put("publishedCount", spec.getPublishedCount());
-            user.put("republishedCount", spec.getRepublishedCount());
-            user.put("score", spec.getScore());
-            day.users.add(user);
+            String username = spec.getUsername() == null ? "unknown" : spec.getUsername();
+            UserSummary user = day.users.computeIfAbsent(username,
+                ignored -> new UserSummary(username, spec.getDisplayName()));
+            user.add(spec);
         }
 
         List<Map<String, Object>> dayList = new ArrayList<>();
         days.forEach((date, summary) -> {
-            summary.users.sort(Comparator.comparingLong(user ->
-                -((Number) user.get("score")).longValue()));
+            List<Map<String, Object>> users = summary.users.values().stream()
+                .sorted(Comparator.comparingLong(UserSummary::score).reversed())
+                .map(UserSummary::toMap)
+                .toList();
             Map<String, Object> day = new LinkedHashMap<>();
             day.put("date", date);
             day.put("score", summary.score);
             day.put("level", level(summary.score, settings));
-            day.put("users", summary.users);
+            day.put("users", users);
             dayList.add(day);
         });
 
@@ -151,6 +148,48 @@ public class ActivityCalendarDataService {
 
     private static class DaySummary {
         private long score;
-        private final List<Map<String, Object>> users = new ArrayList<>();
+        private final Map<String, UserSummary> users = new LinkedHashMap<>();
+    }
+
+    private static class UserSummary {
+        private final String username;
+        private String displayName;
+        private long addedWords;
+        private long modifiedWords;
+        private int publishedCount;
+        private int republishedCount;
+        private long score;
+
+        private UserSummary(String username, String displayName) {
+            this.username = username;
+            this.displayName = displayName;
+        }
+
+        private void add(ActivityRecord.Spec spec) {
+            if (spec.getDisplayName() != null && !spec.getDisplayName().isBlank()) {
+                displayName = spec.getDisplayName();
+            }
+            addedWords += spec.getAddedWords();
+            modifiedWords += spec.getModifiedWords();
+            publishedCount += spec.getPublishedCount();
+            republishedCount += spec.getRepublishedCount();
+            score += spec.getScore();
+        }
+
+        private long score() {
+            return score;
+        }
+
+        private Map<String, Object> toMap() {
+            Map<String, Object> result = new LinkedHashMap<>();
+            result.put("username", username);
+            result.put("displayName", displayName);
+            result.put("addedWords", addedWords);
+            result.put("modifiedWords", modifiedWords);
+            result.put("publishedCount", publishedCount);
+            result.put("republishedCount", republishedCount);
+            result.put("score", score);
+            return result;
+        }
     }
 }

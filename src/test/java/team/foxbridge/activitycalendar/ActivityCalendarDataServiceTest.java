@@ -25,6 +25,27 @@ class ActivityCalendarDataServiceTest {
     }
 
     @Test
+    void mergesSameAuthorsRecordsIntoOneDailyScore() {
+        ActivityRecord.Spec first = spec("2026-02-23", 1323);
+        first.setAddedWords(523);
+        first.setPublishedCount(1);
+        ActivityRecord.Spec second = spec("2026-02-23", 941);
+        second.setAddedWords(141);
+        second.setPublishedCount(1);
+
+        Map<String, Object> result = ActivityCalendarDataService.aggregateSpecs(2026,
+            List.of(first, second), new ActivitySettings());
+        Map<?, ?> day = (Map<?, ?>) ((List<?>) result.get("days")).getFirst();
+        List<?> users = (List<?>) day.get("users");
+        Map<?, ?> author = (Map<?, ?>) users.getFirst();
+
+        assertEquals(1, users.size());
+        assertEquals(2264L, author.get("score"));
+        assertEquals(664L, author.get("addedWords"));
+        assertEquals(2, author.get("publishedCount"));
+    }
+
+    @Test
     void escapesJsonThatCouldCloseTheScriptElement() {
         String escaped = ActivityCalendarHeadProcessor.escapeEmbeddedJson(
             "{\"name\":\"</script>&\"}");

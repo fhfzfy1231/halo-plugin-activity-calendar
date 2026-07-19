@@ -44,13 +44,14 @@
     if (!day || !day.score) return ['当天没有创作活动'];
     const lines = [`${day.score} 活跃分`];
     if (showUsers) {
-      day.users.forEach(user => {
+      (day.users || []).forEach(user => {
         const parts = [];
         if (user.addedWords) parts.push(`新增 ${user.addedWords} 字`);
         if (user.modifiedWords) parts.push(`修改 ${user.modifiedWords} 字`);
         if (user.publishedCount) parts.push(`发布 ${user.publishedCount} 篇`);
         if (user.republishedCount) parts.push(`更新发布 ${user.republishedCount} 次`);
-        lines.push(`${user.displayName || user.username}：${parts.join('，') || `${user.score} 分`}`);
+        const detail = parts.length ? `（${parts.join('，')}）` : '';
+        lines.push(`${user.displayName || user.username}：${user.score || 0} 活跃分${detail}`);
       });
     }
     return lines;
@@ -77,7 +78,7 @@
     placeTooltip(tooltip, target);
   }
 
-  function renderChart(root, data, year, showUsers) {
+  function renderChart(root, data, year, showUsers, tooltip) {
     const card = root.querySelector('.hac-card');
     card.replaceChildren();
     const header = node('div', 'hac-header');
@@ -110,8 +111,6 @@
     body.append(weekdays);
     const days = node('div', 'hac-days');
     const byDate = new Map((data.days || []).map(day => [day.date, day]));
-    const tooltip = root.querySelector('.hac-tooltip');
-
     for (let index = 0; index < totalCells; index++) {
       const date = new Date(gridStart);
       date.setDate(gridStart.getDate() + index);
@@ -168,7 +167,7 @@
         button.setAttribute('aria-current', String(Number(button.dataset.year) === year)));
       card.replaceChildren(node('div', 'hac-loading', '正在加载活跃度…'));
       fetchYear(year)
-        .then(data => renderChart(root, data, year, showUsers))
+        .then(data => renderChart(root, data, year, showUsers, tooltip))
         .catch(() => card.replaceChildren(node('div', 'hac-error', '活跃度数据加载失败')));
     };
 
