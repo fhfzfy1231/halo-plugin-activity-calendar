@@ -15,9 +15,9 @@ import reactor.core.publisher.Mono;
 @Component
 public class ActivityCalendarDataService {
 
-    static final String PLUGIN_VERSION = "2.1.2";
+    static final String PLUGIN_VERSION = "2.1.3";
     static final String API_VERSION = "v1alpha2";
-    static final String BUILD_SIGNATURE = "hac-2.1.2-212";
+    static final String BUILD_SIGNATURE = "hac-2.1.3-213";
     private static final Duration PUBLIC_CACHE_TTL = Duration.ofSeconds(15);
 
     private final ActivityTracker tracker;

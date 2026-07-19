@@ -1,7 +1,10 @@
 package team.foxbridge.activitycalendar;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
+import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
 import org.junit.jupiter.api.Test;
@@ -27,6 +30,16 @@ class ActivityCalendarDataServiceTest {
             "{\"name\":\"</script>&\"}");
 
         assertEquals("{\"name\":\"\\u003c/script\\u003e\\u0026\"}", escaped);
+    }
+
+    @Test
+    void headProcessorDoesNotRequireAnObjectMapperBean() {
+        boolean requiresObjectMapper = Arrays.stream(
+                ActivityCalendarHeadProcessor.class.getDeclaredConstructors())
+            .flatMap(constructor -> Arrays.stream(constructor.getParameterTypes()))
+            .anyMatch(ObjectMapper.class::equals);
+
+        assertFalse(requiresObjectMapper);
     }
 
     private static ActivityRecord.Spec spec(String date, long score) {

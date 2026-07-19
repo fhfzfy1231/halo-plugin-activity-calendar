@@ -17,13 +17,12 @@ public class ActivityCalendarHeadProcessor implements TemplateHeadProcessor {
 
     private final PluginContext pluginContext;
     private final ActivityCalendarDataService dataService;
-    private final ObjectMapper objectMapper;
+    private final ObjectMapper objectMapper = new ObjectMapper();
 
     public ActivityCalendarHeadProcessor(PluginContext pluginContext,
-        ActivityCalendarDataService dataService, ObjectMapper objectMapper) {
+        ActivityCalendarDataService dataService) {
         this.pluginContext = pluginContext;
         this.dataService = dataService;
-        this.objectMapper = objectMapper;
     }
 
     @Override
@@ -65,7 +64,9 @@ public class ActivityCalendarHeadProcessor implements TemplateHeadProcessor {
     }
 
     private static String emptyPayload() {
-        return "{\"pluginVersion\":\"2.1.2\",\"apiVersion\":\"v1alpha2\","
-            + "\"buildSignature\":\"hac-2.1.2-212\",\"years\":{}}";
+        return "{\"pluginVersion\":\"" + ActivityCalendarDataService.PLUGIN_VERSION
+            + "\",\"apiVersion\":\"" + ActivityCalendarDataService.API_VERSION
+            + "\",\"buildSignature\":\"" + ActivityCalendarDataService.BUILD_SIGNATURE
+            + "\",\"years\":{}}";
     }
 }
