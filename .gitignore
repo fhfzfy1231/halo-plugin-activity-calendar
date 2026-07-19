@@ -78,3 +78,6 @@ application-local.properties
 /ui/build/
 /workplace/
 /src/main/resources/ui/
+
+# Release notes are maintained on GitHub Releases instead of the repository root.
+RELEASE-v*.md
